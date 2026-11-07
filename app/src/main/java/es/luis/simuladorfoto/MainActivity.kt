@@ -136,13 +136,12 @@ val etiquetasVel = listOf(
 val diafragmas = listOf(1.4f, 2f, 2.8f, 4f, 5.6f, 8f, 11f, 16f, 22f)
 val isos = listOf(100, 200, 400, 800, 1600, 3200, 6400, 12800)
 
-// La foto está hecha con un 24 mm: con focales más cortas se ve el mismo encuadre
-// (no hay más escena), pero el desenfoque y la velocidad a pulso son los de esa focal.
-// Con focales largas se ve una parte pequeña de la foto ampliada y pierde nitidez.
+// La foto está hecha con un 24 mm, así que el zoom va de 24 a 200 mm.
+// A 200 mm se ve una parte pequeña de la foto ampliada y pierde algo de nitidez.
 const val FOCAL_FOTO = 24
 val FOCALES_INICIALES = listOf(24, 50, 70, 200)
-const val FOCAL_MIN = 4
-const val FOCAL_MAX = 500f
+const val FOCAL_MIN = 24
+const val FOCAL_MAX = 200f
 
 fun zoomDe(focal: Float) = (focal / FOCAL_FOTO).coerceAtLeast(1f)
 
@@ -150,7 +149,8 @@ fun zoomDe(focal: Float) = (focal / FOCAL_FOTO).coerceAtLeast(1f)
 fun leeFocales(ctx: Context): List<Int> {
     val txt = ctx.getSharedPreferences("simulador", Context.MODE_PRIVATE).getString("focales", null)
     val lista = txt?.split(",")?.mapNotNull { it.toIntOrNull() }
-    return if (lista != null && lista.size == FOCALES_INICIALES.size) lista else FOCALES_INICIALES
+    return if (lista != null && lista.size == FOCALES_INICIALES.size) lista.map { it.coerceIn(FOCAL_MIN, FOCAL_MAX.toInt()) }
+    else FOCALES_INICIALES
 }
 
 fun guardaFocales(ctx: Context, lista: List<Int>) {
@@ -514,7 +514,7 @@ fun Foto(
                             val cambio = evento.calculateZoom()
                             // El punto de la foto que estaba bajo los dedos sigue bajo los dedos
                             val punto = c + (centroide - pan - medio) / escala(f)
-                            // el pellizco va de 24 a 500 mm (más angular no cambia el encuadre)
+                            // el pellizco va de 24 a 200 mm
                             f = (maxOf(f, FOCAL_FOTO.toFloat()) * cambio).coerceIn(FOCAL_FOTO.toFloat(), FOCAL_MAX)
                             c = limitaCentro(punto - (centroide - medio) / escala(f), zoomDe(f))
                             onEncuadre(f, c)
@@ -848,13 +848,6 @@ fun Controles(
             color = Color.Gray,
             style = MaterialTheme.typography.bodySmall
         )
-        if (focal < FOCAL_FOTO) {
-            Text(
-                "Más angular que la foto (24 mm): se ve el mismo encuadre, pero el desenfoque y la velocidad a pulso son los de $mm mm",
-                color = Color(0xFFFFB300),
-                style = MaterialTheme.typography.bodySmall
-            )
-        }
         val idx = editando
         if (idx != null) {
             DialogoFocal(
