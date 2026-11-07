@@ -13,6 +13,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.swipe
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pinch
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -93,6 +94,23 @@ class GestosTest {
         assertTrue("El zoom ha cambiado al arrastrar", textoObjetivo().contains("50 mm"))
         assertEquals("Arrastrar no debe cambiar el enfoque", 1,
             regla.onAllNodesWithText("Enfoque: 3 m", substring = true).fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun mantenerParaCambiarFocal() {
+        val chip = regla.onNodeWithText("70 mm")
+        chip.performTouchInput { down(center) }
+        regla.mainClock.advanceTimeBy(3500)
+        Thread.sleep(3500)
+        regla.waitUntil(timeoutMillis = 20_000) {
+            regla.onAllNodesWithText("Distancia focal").fetchSemanticsNodes().isNotEmpty()
+        }
+        chip.performTouchInput { up() }
+        regla.onNodeWithTag("campoFocal").performTextReplacement("135")
+        regla.onNodeWithText("Aceptar").performClick()
+        regla.waitUntil(timeoutMillis = 20_000) { textoObjetivo().contains("135 mm") }
+        assertEquals("No aparece el botón de 135 mm", 1,
+            regla.onAllNodesWithText("135 mm").fetchSemanticsNodes().size)
     }
 
     @Test

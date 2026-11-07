@@ -36,7 +36,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -74,7 +78,11 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -128,11 +136,27 @@ val etiquetasVel = listOf(
 val diafragmas = listOf(1.4f, 2f, 2.8f, 4f, 5.6f, 8f, 11f, 16f, 22f)
 val isos = listOf(100, 200, 400, 800, 1600, 3200, 6400, 12800)
 
-// La foto está hecha con un 24 mm, así que no se puede ir más angular.
-// A 200 mm se ve solo una parte pequeña de la foto ampliada, y pierde nitidez.
+// La foto está hecha con un 24 mm: con focales más cortas se ve el mismo encuadre
+// (no hay más escena), pero el desenfoque y la velocidad a pulso son los de esa focal.
+// Con focales largas se ve una parte pequeña de la foto ampliada y pierde nitidez.
 const val FOCAL_FOTO = 24
-val focales = listOf(24, 50, 70, 200)
-const val FOCAL_MAX = 200f
+val FOCALES_INICIALES = listOf(24, 50, 70, 200)
+const val FOCAL_MIN = 4
+const val FOCAL_MAX = 500f
+
+fun zoomDe(focal: Float) = (focal / FOCAL_FOTO).coerceAtLeast(1f)
+
+// Los botones de focal se pueden cambiar manteniéndolos pulsados; se guardan en el móvil
+fun leeFocales(ctx: Context): List<Int> {
+    val txt = ctx.getSharedPreferences("simulador", Context.MODE_PRIVATE).getString("focales", null)
+    val lista = txt?.split(",")?.mapNotNull { it.toIntOrNull() }
+    return if (lista != null && lista.size == FOCALES_INICIALES.size) lista else FOCALES_INICIALES
+}
+
+fun guardaFocales(ctx: Context, lista: List<Int>) {
+    ctx.getSharedPreferences("simulador", Context.MODE_PRIVATE).edit()
+        .putString("focales", lista.joinToString(",")).apply()
+}
 
 const val SENSOR_ANCHO = 0.036f   // foto horizontal de formato completo: 36 mm de ancho
 const val PULSO = 0.035f          // temblor de la mano (rad/s): da la regla de 1/focal
@@ -376,7 +400,8 @@ fun Simulador(onCuestionarios: () -> Unit) {
     val t = velocidades[iVel.roundToInt()]
     val n = diafragmas[iDia.roundToInt()]
     val iso = isos[iIso.roundToInt()]
-    val zoom = focal / FOCAL_FOTO.toFloat()
+    val zoom = zoomDe(focal)
+    var botonesFocal by remember { mutableStateOf(leeFocales(ctx)) }
 
     // Exposición correcta de referencia: 1/125, f/5.6, ISO 100
     val ev = log2((t / (1 / 125f)) * (iso / 100f) / ((n / 5.6f) * (n / 5.6f))).coerceIn(-10f, 10f)
@@ -393,7 +418,14 @@ fun Simulador(onCuestionarios: () -> Unit) {
 
     val controles: @Composable (Modifier) -> Unit = { mod ->
         Controles(
-            mod, focal, { focal = it; centro = mira }, enfoque, iVel, { iVel = it }, iDia, { iDia = it }, iIso, { iIso = it },
+            mod, focal, { focal = it; centro = mira }, botonesFocal,
+            { i, f ->
+                botonesFocal = botonesFocal.toMutableList().also { it[i] = f }
+                guardaFocales(ctx, botonesFocal)
+                focal = f.toFloat()
+                centro = mira
+            },
+            enfoque, iVel, { iVel = it }, iDia, { iDia = it }, iIso, { iIso = it },
             tripode, { tripode = it }, onCuestionarios
         )
     }
@@ -408,7 +440,7 @@ fun Simulador(onCuestionarios: () -> Unit) {
         val foto: @Composable (Modifier) -> Unit = { mod ->
             Foto(
                 mod, rec, focal, zoom, centroOk,
-                { f, c -> focal = f; centro = limitaCentro(c, f / FOCAL_FOTO) },
+                { f, c -> focal = f; centro = limitaCentro(c, zoomDe(f)) },
                 enfoque, n, t, filtro, iso, mira,
                 onEnfoca = { d, p -> enfoque = d; mira = p },
                 ev, hist, verHistograma, { verHistograma = it }, tripode
@@ -464,13 +496,13 @@ fun Foto(
                 val zonaH = size.height.toFloat()
                 val dw = minOf(zonaW, zonaH * FOTO_W / FOTO_H)
                 val medio = Offset(zonaW / 2, zonaH / 2)
-                fun escala(f: Float) = dw * (f / FOCAL_FOTO) / FOTO_W
+                fun escala(f: Float) = dw * zoomDe(f) / FOTO_W
                 val primero = awaitFirstDown(requireUnconsumed = false)
                 val inicio = primero.position
                 var dosDedos = false
                 var arrastrando = false
                 var f = focalActual
-                var c = limitaCentro(centroActual, f / FOCAL_FOTO)
+                var c = limitaCentro(centroActual, zoomDe(f))
                 while (true) {
                     val evento = awaitPointerEvent()
                     val pulsados = evento.changes.count { it.pressed }
@@ -482,8 +514,9 @@ fun Foto(
                             val cambio = evento.calculateZoom()
                             // El punto de la foto que estaba bajo los dedos sigue bajo los dedos
                             val punto = c + (centroide - pan - medio) / escala(f)
-                            f = (f * cambio).coerceIn(FOCAL_FOTO.toFloat(), FOCAL_MAX)
-                            c = limitaCentro(punto - (centroide - medio) / escala(f), f / FOCAL_FOTO)
+                            // el pellizco va de 24 a 500 mm (más angular no cambia el encuadre)
+                            f = (maxOf(f, FOCAL_FOTO.toFloat()) * cambio).coerceIn(FOCAL_FOTO.toFloat(), FOCAL_MAX)
+                            c = limitaCentro(punto - (centroide - medio) / escala(f), zoomDe(f))
                             onEncuadre(f, c)
                         }
                         evento.changes.forEach { if (it.positionChanged()) it.consume() }
@@ -497,7 +530,7 @@ fun Foto(
                             val mov = dedo.position - dedo.previousPosition
                             if (mov != Offset.Zero) {
                                 f = focalActual
-                                c = limitaCentro(c - mov / escala(f), f / FOCAL_FOTO)
+                                c = limitaCentro(c - mov / escala(f), zoomDe(f))
                                 onEncuadre(f, c)
                             }
                             dedo.consume()
@@ -509,7 +542,7 @@ fun Foto(
                         val tocado = ultimo?.isConsumed == true   // lo ha usado otro botón (la exposición)
                         if (!dosDedos && !arrastrando && !tocado && (fin - inicio).getDistance() < viewConfiguration.touchSlop) {
                             val fa = focalActual
-                            val p = limitaCentro(centroActual, fa / FOCAL_FOTO) + (fin - medio) / escala(fa)
+                            val p = limitaCentro(centroActual, zoomDe(fa)) + (fin - medio) / escala(fa)
                             if (p.x in 0f..FOTO_W && p.y in 0f..FOTO_H) {
                                 val persona = rec.personaEn(p)
                                 val d = if (persona != null) capas[persona].distancia else distanciaSuelo(p.y)
@@ -690,12 +723,47 @@ fun Histograma(hist: IntArray, ev: String, modifier: Modifier) {
     }
 }
 
+@Composable
+fun DialogoFocal(inicial: Int, onAceptar: (Int) -> Unit, onCancelar: () -> Unit) {
+    var texto by remember { mutableStateOf(inicial.toString()) }
+    val valor = texto.toIntOrNull()
+    val valido = valor != null && valor in FOCAL_MIN..FOCAL_MAX.toInt()
+    AlertDialog(
+        onDismissRequest = onCancelar,
+        title = { Text("Distancia focal") },
+        text = {
+            Column {
+                Text("Escribe la focal para este botón, de $FOCAL_MIN a ${FOCAL_MAX.toInt()} mm.")
+                OutlinedTextField(
+                    value = texto,
+                    onValueChange = { nuevo -> texto = nuevo.filter { it.isDigit() }.take(3) },
+                    label = { Text("mm") },
+                    singleLine = true,
+                    isError = !valido,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.padding(top = 8.dp).testTag("campoFocal")
+                )
+                if (!valido) {
+                    Text("Tiene que estar entre $FOCAL_MIN y ${FOCAL_MAX.toInt()}", color = Color(0xFFE57373),
+                        style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { if (valor != null && valido) onAceptar(valor) }, enabled = valido) { Text("Aceptar") }
+        },
+        dismissButton = { TextButton(onClick = onCancelar) { Text("Cancelar") } }
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun Controles(
     modifier: Modifier,
     focal: Float,
     onFocal: (Float) -> Unit,
+    botonesFocal: List<Int>,
+    onCambiaBoton: (Int, Int) -> Unit,
     enfoque: Float,
     iVel: Float,
     onVel: (Float) -> Unit,
@@ -716,6 +784,8 @@ fun Controles(
     val etiquetaSegura = etiquetasVel[velocidades.indexOf(segura)]
     val movida = !tripode && t > 1f / focal
     val mm = focal.roundToInt()
+    val vibra = LocalHapticFeedback.current
+    var editando by remember { mutableStateOf<Int?>(null) }
 
     Column(
         modifier
@@ -742,13 +812,56 @@ fun Controles(
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Text("Objetivo: $mm mm", color = Color.White)
-            focales.forEach { f ->
+            botonesFocal.forEachIndexed { i, f ->
                 FilterChip(
                     selected = abs(focal - f) < 0.5f,
                     onClick = { onFocal(f.toFloat()) },
-                    label = { Text("$f mm") }
+                    label = { Text("$f mm") },
+                    // Mantener pulsado 3 s para escribir otra focal
+                    modifier = Modifier.pointerInput(i) {
+                        awaitEachGesture {
+                            val abajo = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                            val resultado = withTimeoutOrNull(3000L) {
+                                var r = "soltado"
+                                while (true) {
+                                    val e = awaitPointerEvent(PointerEventPass.Initial)
+                                    val dedo = e.changes.firstOrNull { it.id == abajo.id }
+                                    if (dedo == null || !dedo.pressed) break
+                                    if ((dedo.position - abajo.position).getDistance() > viewConfiguration.touchSlop) {
+                                        r = "movido"
+                                        break
+                                    }
+                                }
+                                r
+                            }
+                            if (resultado == null) {
+                                vibra.performHapticFeedback(HapticFeedbackType.LongPress)
+                                editando = i
+                            }
+                        }
+                    }
                 )
             }
+        }
+        Text(
+            "Mantén pulsado un objetivo 3 s para poner otra focal (de $FOCAL_MIN a ${FOCAL_MAX.toInt()} mm)",
+            color = Color.Gray,
+            style = MaterialTheme.typography.bodySmall
+        )
+        if (focal < FOCAL_FOTO) {
+            Text(
+                "Más angular que la foto (24 mm): se ve el mismo encuadre, pero el desenfoque y la velocidad a pulso son los de $mm mm",
+                color = Color(0xFFFFB300),
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+        val idx = editando
+        if (idx != null) {
+            DialogoFocal(
+                inicial = botonesFocal[idx],
+                onAceptar = { v -> onCambiaBoton(idx, v); editando = null },
+                onCancelar = { editando = null }
+            )
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("Velocidad: ${etiquetasVel[iVel.roundToInt()]} s", color = Color.White)
