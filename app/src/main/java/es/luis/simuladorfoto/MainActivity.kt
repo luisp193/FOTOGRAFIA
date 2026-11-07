@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -36,6 +37,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
@@ -274,6 +276,7 @@ fun Simulador() {
     var mira by remember { mutableStateOf(capas[1].mira) }
     var centro by remember { mutableStateOf(Offset(FOTO_W / 2, FOTO_H / 2)) }
     var verHistograma by remember { mutableStateOf(false) }
+    var tripode by remember { mutableStateOf(false) }
 
     val t = velocidades[iVel.roundToInt()]
     val n = diafragmas[iDia.roundToInt()]
@@ -293,7 +296,8 @@ fun Simulador() {
 
     val controles: @Composable (Modifier) -> Unit = { mod ->
         Controles(
-            mod, focal, { focal = it; centro = mira }, enfoque, iVel, { iVel = it }, iDia, { iDia = it }, iIso, { iIso = it }
+            mod, focal, { focal = it; centro = mira }, enfoque, iVel, { iVel = it }, iDia, { iDia = it }, iIso, { iIso = it },
+            tripode, { tripode = it }
         )
     }
 
@@ -310,7 +314,7 @@ fun Simulador() {
                 { f, c -> focal = f; centro = limitaCentro(c, f / FOCAL_FOTO) },
                 enfoque, n, t, filtro, iso, mira,
                 onEnfoca = { d, p -> enfoque = d; mira = p },
-                ev, hist, verHistograma, { verHistograma = it }
+                ev, hist, verHistograma, { verHistograma = it }, tripode
             )
         }
         if (horizontal) {
@@ -345,7 +349,8 @@ fun Foto(
     ev: Float,
     hist: IntArray,
     verHistograma: Boolean,
-    onVerHistograma: (Boolean) -> Unit
+    onVerHistograma: (Boolean) -> Unit,
+    tripode: Boolean
 ) {
     val density = LocalDensity.current
     BoxWithConstraints(modifier, contentAlignment = Alignment.Center) {
@@ -366,7 +371,8 @@ fun Foto(
 
         // Trepidación: trazo que deja el temblor de la mano mientras el obturador está abierto
         val k = focal / 1000f / SENSOR_ANCHO * dw
-        val temblor = k * PULSO * t
+        // Con trípode la cámara no tiembla
+        val temblor = if (tripode) 0f else k * PULSO * t
         fun radioX(dof: Float) = aDp(hypot(dof, temblor * 0.45f))
         fun radioY(dof: Float) = aDp(hypot(dof, temblor * 0.2f))
 
@@ -570,7 +576,9 @@ fun Controles(
     iDia: Float,
     onDia: (Float) -> Unit,
     iIso: Float,
-    onIso: (Float) -> Unit
+    onIso: (Float) -> Unit,
+    tripode: Boolean,
+    onTripode: (Boolean) -> Unit
 ) {
     val t = velocidades[iVel.roundToInt()]
     val n = diafragmas[iDia.roundToInt()]
@@ -579,7 +587,7 @@ fun Controles(
     // Velocidad mínima a pulso según la regla de 1/focal
     val segura = velocidades.filter { it <= 1f / focal }.maxOrNull() ?: velocidades.first()
     val etiquetaSegura = etiquetasVel[velocidades.indexOf(segura)]
-    val movida = t > 1f / focal
+    val movida = !tripode && t > 1f / focal
     val mm = focal.roundToInt()
 
     Column(
@@ -609,9 +617,15 @@ fun Controles(
                 )
             }
         }
-        Text("Velocidad: ${etiquetasVel[iVel.roundToInt()]} s", color = Color.White)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("Velocidad: ${etiquetasVel[iVel.roundToInt()]} s", color = Color.White)
+            Spacer(Modifier.weight(1f))
+            Text("Trípode", color = Color.White, modifier = Modifier.padding(end = 8.dp))
+            Switch(checked = tripode, onCheckedChange = onTripode)
+        }
         Text(
-            if (movida) "⚠ Foto movida por el pulso: con $mm mm usa $etiquetaSegura s o más rápida"
+            if (tripode) "Con trípode no sale movida por el pulso, a ninguna velocidad"
+            else if (movida) "⚠ Foto movida por el pulso: con $mm mm usa $etiquetaSegura s o más rápida"
             else "A pulso con $mm mm: $etiquetaSegura s o más rápida",
             color = if (movida) Color(0xFFFFB300) else Color.Gray,
             style = MaterialTheme.typography.bodySmall
