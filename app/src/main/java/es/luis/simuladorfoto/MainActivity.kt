@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Bundle
-import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -35,6 +34,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -98,7 +98,7 @@ class MainActivity : ComponentActivity() {
         )
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
-                Simulador()
+                App()
             }
         }
     }
@@ -265,7 +265,17 @@ fun histogramaExpuesto(base: IntArray, factor: Float): IntArray {
 // ---------- Pantalla ----------
 
 @Composable
-fun Simulador() {
+fun App() {
+    var verCuestionarios by remember { mutableStateOf(false) }
+    Box(Modifier.fillMaxSize()) {
+        // El simulador sigue debajo para no perder sus ajustes al volver
+        Simulador(onCuestionarios = { verCuestionarios = true })
+        if (verCuestionarios) Cuestionarios(onSalir = { verCuestionarios = false })
+    }
+}
+
+@Composable
+fun Simulador(onCuestionarios: () -> Unit) {
     val ctx = LocalContext.current
     val rec = remember { Recursos(ctx.applicationContext) }
 
@@ -298,7 +308,7 @@ fun Simulador() {
     val controles: @Composable (Modifier) -> Unit = { mod ->
         Controles(
             mod, focal, { focal = it; centro = mira }, enfoque, iVel, { iVel = it }, iDia, { iDia = it }, iIso, { iIso = it },
-            tripode, { tripode = it }
+            tripode, { tripode = it }, onCuestionarios
         )
     }
 
@@ -354,7 +364,61 @@ fun Foto(
     tripode: Boolean
 ) {
     val density = LocalDensity.current
-    BoxWithConstraints(modifier, contentAlignment = Alignment.Center) {
+    // Valores actuales para el gesto, que no se reinicia al mover o ampliar la foto
+    val centroActual by rememberUpdatedState(centro)
+    val focalActual by rememberUpdatedState(focal)
+    // Un dedo: tocar para enfocar. Dos dedos: pellizcar para el zoom y arrastrar para mover.
+    // Se recoge en toda la zona de la foto, también en las franjas negras, para que quepan los dos dedos.
+    val gestos = Modifier
+        .testTag("foto")
+        .pointerInput(Unit) {
+            awaitEachGesture {
+                val zonaW = size.width.toFloat()
+                val zonaH = size.height.toFloat()
+                val dw = minOf(zonaW, zonaH * FOTO_W / FOTO_H)
+                val medio = Offset(zonaW / 2, zonaH / 2)
+                fun escala(f: Float) = dw * (f / FOCAL_FOTO) / FOTO_W
+                val primero = awaitFirstDown(requireUnconsumed = false)
+                val inicio = primero.position
+                var dosDedos = false
+                var f = focalActual
+                var c = limitaCentro(centroActual, f / FOCAL_FOTO)
+                while (true) {
+                    val evento = awaitPointerEvent()
+                    val pulsados = evento.changes.count { it.pressed }
+                    if (pulsados >= 2) {
+                        dosDedos = true
+                        val centroide = evento.calculateCentroid(useCurrent = true)
+                        if (centroide != Offset.Unspecified) {
+                            val pan = evento.calculatePan()
+                            val cambio = evento.calculateZoom()
+                            // El punto de la foto que estaba bajo los dedos sigue bajo los dedos
+                            val punto = c + (centroide - pan - medio) / escala(f)
+                            f = (f * cambio).coerceIn(FOCAL_FOTO.toFloat(), FOCAL_MAX)
+                            c = limitaCentro(punto - (centroide - medio) / escala(f), f / FOCAL_FOTO)
+                            onEncuadre(f, c)
+                        }
+                        evento.changes.forEach { if (it.positionChanged()) it.consume() }
+                    }
+                    if (pulsados == 0) {
+                        val ultimo = evento.changes.firstOrNull { it.id == primero.id }
+                        val fin = ultimo?.position ?: inicio
+                        val tocado = ultimo?.isConsumed == true   // lo ha usado otro botón (la exposición)
+                        if (!dosDedos && !tocado && (fin - inicio).getDistance() < viewConfiguration.touchSlop) {
+                            val fa = focalActual
+                            val p = limitaCentro(centroActual, fa / FOCAL_FOTO) + (fin - medio) / escala(fa)
+                            if (p.x in 0f..FOTO_W && p.y in 0f..FOTO_H) {
+                                val persona = rec.personaEn(p)
+                                val d = if (persona != null) capas[persona].distancia else distanciaSuelo(p.y)
+                                onEnfoca(d, p)
+                            }
+                        }
+                        break
+                    }
+                }
+            }
+        }
+    BoxWithConstraints(modifier.then(gestos), contentAlignment = Alignment.Center) {
         // Rectángulo donde cabe la foto entera
         val maxW = constraints.maxWidth.toFloat()
         val maxH = constraints.maxHeight.toFloat()
@@ -365,10 +429,6 @@ fun Foto(
         val oy = dh / 2 - centro.y * s
         fun aPantalla(p: Offset) = Offset(ox + p.x * s, oy + p.y * s)
         fun aDp(px: Float): Dp = with(density) { px.coerceIn(0f, 80f).toDp() }
-        // Valores actuales para el gesto, que no se reinicia al mover o ampliar la foto
-        val centroActual by rememberUpdatedState(centro)
-        val focalActual by rememberUpdatedState(focal)
-        fun escala(f: Float) = dw * (f / FOCAL_FOTO) / FOTO_W
 
         // Trepidación: trazo que deja el temblor de la mano mientras el obturador está abierto
         val k = focal / 1000f / SENSOR_ANCHO * dw
@@ -434,58 +494,8 @@ fun Foto(
                 }
             }
 
-            // Punto de mira. Un dedo: tocar para enfocar. Dos dedos: pellizcar para el zoom y arrastrar para mover.
-            Canvas(
-                Modifier
-                    .fillMaxSize()
-                    .testTag("foto")
-                    .pointerInput(dw, dh) {
-                        awaitEachGesture {
-                            val primero = awaitFirstDown(requireUnconsumed = false)
-                            val inicio = primero.position
-                            var dosDedos = false
-                            var f = focalActual
-                            var c = limitaCentro(centroActual, f / FOCAL_FOTO)
-                            val medio = Offset(dw / 2, dh / 2)
-                            while (true) {
-                                val evento = awaitPointerEvent()
-                                val pulsados = evento.changes.count { it.pressed }
-                                Log.d("Gestos", "evento tipo=${evento.type} pulsados=$pulsados cambios=${evento.changes.size} f=$f")
-                                if (pulsados >= 2) {
-                                    dosDedos = true
-                                    val centroide = evento.calculateCentroid(useCurrent = true)
-                                    if (centroide != Offset.Unspecified) {
-                                        val pan = evento.calculatePan()
-                                        val cambio = evento.calculateZoom()
-                                        // El punto de la foto que estaba bajo los dedos sigue bajo los dedos
-                                        val punto = c + (centroide - pan - medio) / escala(f)
-                                        f = (f * cambio).coerceIn(FOCAL_FOTO.toFloat(), FOCAL_MAX)
-                                        c = limitaCentro(punto - (centroide - medio) / escala(f), f / FOCAL_FOTO)
-                                        Log.d("Gestos", "zoom cambio=$cambio pan=$pan f=$f c=$c")
-                                        onEncuadre(f, c)
-                                    }
-                                    evento.changes.forEach { if (it.positionChanged()) it.consume() }
-                                }
-                                if (pulsados == 0) {
-                                    val fin = evento.changes.firstOrNull { it.id == primero.id }?.position ?: inicio
-                                    if (!dosDedos && (fin - inicio).getDistance() < viewConfiguration.touchSlop) {
-                                        val fa = focalActual
-                                        val sa = escala(fa)
-                                        val actual = limitaCentro(centroActual, fa / FOCAL_FOTO)
-                                        val p = Offset(
-                                            (fin.x - (dw / 2 - actual.x * sa)) / sa,
-                                            (fin.y - (dh / 2 - actual.y * sa)) / sa
-                                        )
-                                        val persona = rec.personaEn(p)
-                                        val d = if (persona != null) capas[persona].distancia else distanciaSuelo(p.y)
-                                        onEnfoca(d, p)
-                                    }
-                                    break
-                                }
-                            }
-                        }
-                    }
-            ) {
+            // Punto de mira (los gestos se recogen en toda la zona de la foto, más abajo)
+            Canvas(Modifier.fillMaxSize()) {
                 val c = aPantalla(mira)
                 val r = 22.dp.toPx()
                 drawCircle(Color.Red, radius = r, center = c, style = Stroke(3.dp.toPx()))
@@ -581,7 +591,8 @@ fun Controles(
     iIso: Float,
     onIso: (Float) -> Unit,
     tripode: Boolean,
-    onTripode: (Boolean) -> Unit
+    onTripode: (Boolean) -> Unit,
+    onCuestionarios: () -> Unit
 ) {
     val t = velocidades[iVel.roundToInt()]
     val n = diafragmas[iDia.roundToInt()]
@@ -598,12 +609,18 @@ fun Controles(
             .background(Color(0xFF1E1E1E))
             .padding(horizontal = 16.dp, vertical = 6.dp)
     ) {
-        Text(
-            "Enfoque: ${textoMetros(enfoque)} m · toca la foto para enfocar" +
-                " · dos dedos para el zoom y mover",
-            color = Color.LightGray,
-            style = MaterialTheme.typography.bodySmall
-        )
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Enfoque: ${textoMetros(enfoque)} m · toca la foto para enfocar" +
+                    " · dos dedos para el zoom y mover",
+                color = Color.LightGray,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f)
+            )
+            FilledTonalButton(onClick = onCuestionarios, modifier = Modifier.padding(start = 8.dp)) {
+                Text("Cuestionarios")
+            }
+        }
         Row(
             Modifier
                 .fillMaxWidth()

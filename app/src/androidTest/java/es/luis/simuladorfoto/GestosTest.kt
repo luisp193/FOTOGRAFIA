@@ -8,6 +8,9 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pinch
@@ -24,10 +27,14 @@ class GestosTest {
     @get:Rule
     val regla = createAndroidComposeRule<MainActivity>()
 
+    // El emulador no tiene tarjeta gráfica y el desenfoque tarda: la captura no debe tumbar la prueba
     private fun captura(nombre: String) {
-        regla.waitForIdle()
-        val img = regla.onRoot().captureToImage().asAndroidBitmap()
-        TestStorage().openOutputFile("$nombre.png").use { img.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        try {
+            val img = regla.onRoot().captureToImage().asAndroidBitmap()
+            TestStorage().openOutputFile("$nombre.png").use { img.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        } catch (e: Throwable) {
+            println("CAPTURA $nombre no disponible: ${e.message}")
+        }
     }
 
     private fun textoObjetivo(): String {
@@ -49,17 +56,36 @@ class GestosTest {
                 durationMillis = 800
             )
         }
-        captura("2_tras_pellizco")
+        regla.waitUntil(timeoutMillis = 60_000) { textoObjetivo() != antes }
         val despues = textoObjetivo()
+        captura("2_tras_pellizco")
         println("OBJETIVO antes=[$antes] despues=[$despues]")
         assertNotEquals("El pellizco no cambia el objetivo", antes, despues)
+    }
+
+    @Test
+    fun cuestionario() {
+        regla.onNodeWithText("Cuestionarios").performClick()
+        captura("4_temas")
+        regla.onNodeWithText("Velocidad y movimiento").performClick()
+        captura("5_pregunta")
+        // responde la primera opción y comprueba que sale la explicación
+        regla.onAllNodes(hasClickAction()).fetchSemanticsNodes()
+        regla.onNodeWithText("Pregunta 1 de 10", substring = true).assertExists()
+        val botones = regla.onAllNodes(hasClickAction())
+        botones[botones.fetchSemanticsNodes().size - 1].performClick()
+        captura("6_respuesta")
+        regla.onNodeWithText("Siguiente").assertExists()
     }
 
     @Test
     fun tocarEnfoca() {
         // Tocar al hombre de la izquierda (primer plano, 1 m)
         regla.onNodeWithTag("foto").performTouchInput {
-            click(Offset(width * 0.16f, height * 0.35f))
+            // la foto ocupa el centro de la zona; el hombre tiene la cara en (430, 330) de la foto
+            val dw = minOf(width.toFloat(), height * FOTO_W / FOTO_H)
+            val dh = dw * FOTO_H / FOTO_W
+            click(Offset((width - dw) / 2 + 430f / FOTO_W * dw, (height - dh) / 2 + 330f / FOTO_H * dh))
         }
         captura("3_enfoque_1m")
         val enfoque = regla.onAllNodesWithText("Enfoque: 1 m", substring = true).fetchSemanticsNodes().size
