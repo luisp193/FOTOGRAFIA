@@ -79,6 +79,8 @@ import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -450,7 +452,8 @@ fun Foto(
     // Valores actuales para el gesto, que no se reinicia al mover o ampliar la foto
     val centroActual by rememberUpdatedState(centro)
     val focalActual by rememberUpdatedState(focal)
-    // Un dedo: tocar para enfocar. Dos dedos: pellizcar para el zoom y arrastrar para mover.
+    // Un dedo: toque rápido para enfocar, pulsar y arrastrar para mover la foto.
+    // Dos dedos: pellizcar para el zoom.
     // Se recoge en toda la zona de la foto, también en las franjas negras, para que quepan los dos dedos.
     val gestos = Modifier
         .testTag("foto")
@@ -464,6 +467,7 @@ fun Foto(
                 val primero = awaitFirstDown(requireUnconsumed = false)
                 val inicio = primero.position
                 var dosDedos = false
+                var arrastrando = false
                 var f = focalActual
                 var c = limitaCentro(centroActual, f / FOCAL_FOTO)
                 while (true) {
@@ -482,12 +486,27 @@ fun Foto(
                             onEncuadre(f, c)
                         }
                         evento.changes.forEach { if (it.positionChanged()) it.consume() }
+                    } else if (pulsados == 1) {
+                        // Un dedo: si se mueve más que un toque, arrastra la foto
+                        val dedo = evento.changes.first { it.pressed }
+                        if (!arrastrando && (dedo.position - inicio).getDistance() > viewConfiguration.touchSlop) {
+                            arrastrando = true
+                        }
+                        if (arrastrando) {
+                            val mov = dedo.position - dedo.previousPosition
+                            if (mov != Offset.Zero) {
+                                f = focalActual
+                                c = limitaCentro(c - mov / escala(f), f / FOCAL_FOTO)
+                                onEncuadre(f, c)
+                            }
+                            dedo.consume()
+                        }
                     }
                     if (pulsados == 0) {
                         val ultimo = evento.changes.firstOrNull { it.id == primero.id }
                         val fin = ultimo?.position ?: inicio
                         val tocado = ultimo?.isConsumed == true   // lo ha usado otro botón (la exposición)
-                        if (!dosDedos && !tocado && (fin - inicio).getDistance() < viewConfiguration.touchSlop) {
+                        if (!dosDedos && !arrastrando && !tocado && (fin - inicio).getDistance() < viewConfiguration.touchSlop) {
                             val fa = focalActual
                             val p = limitaCentro(centroActual, fa / FOCAL_FOTO) + (fin - medio) / escala(fa)
                             if (p.x in 0f..FOTO_W && p.y in 0f..FOTO_H) {
@@ -501,7 +520,11 @@ fun Foto(
                 }
             }
         }
-    BoxWithConstraints(modifier.then(gestos), contentAlignment = Alignment.Center) {
+    val encuadre = "Encuadre ${centro.x.roundToInt()} ${centro.y.roundToInt()}"
+    BoxWithConstraints(
+        modifier.then(gestos).semantics { stateDescription = encuadre },
+        contentAlignment = Alignment.Center
+    ) {
         // Rectángulo donde cabe la foto entera
         val maxW = constraints.maxWidth.toFloat()
         val maxH = constraints.maxHeight.toFloat()
@@ -701,7 +724,7 @@ fun Controles(
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 "Enfoque: ${textoMetros(enfoque)} m · toca la foto para enfocar" +
-                    " · dos dedos para el zoom y mover",
+                    " · arrastra para mover · pellizca para el zoom",
                 color = Color.LightGray,
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.weight(1f)

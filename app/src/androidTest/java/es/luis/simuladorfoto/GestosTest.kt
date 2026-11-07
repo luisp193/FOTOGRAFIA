@@ -12,6 +12,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.swipe
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pinch
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -71,6 +72,27 @@ class GestosTest {
         captura("2_tras_pellizco")
         println("OBJETIVO antes=[$antes] despues=[$despues]")
         assertNotEquals("El pellizco no cambia el objetivo", antes, despues)
+    }
+
+    private fun encuadre(): String =
+        regla.onNodeWithTag("foto").fetchSemanticsNode().config
+            .getOrElse(androidx.compose.ui.semantics.SemanticsProperties.StateDescription) { "" }
+
+    @Test
+    fun arrastrarConUnDedo() {
+        regla.onNodeWithText("50 mm").performClick()
+        regla.waitUntil(timeoutMillis = 30_000) { textoObjetivo().contains("50 mm") }
+        val antes = encuadre()
+        // arrastrar empezando sobre el hombre de 1 m: no debe enfocarlo, solo mover la foto
+        regla.onNodeWithTag("foto").performTouchInput {
+            swipe(center + Offset(-250f, 0f), center + Offset(150f, 0f), durationMillis = 600)
+        }
+        regla.waitUntil(timeoutMillis = 30_000) { encuadre() != antes }
+        println("ENCUADRE antes=[$antes] despues=[${encuadre()}]")
+        assertNotEquals("Arrastrar con un dedo no mueve la foto", antes, encuadre())
+        assertTrue("El zoom ha cambiado al arrastrar", textoObjetivo().contains("50 mm"))
+        assertEquals("Arrastrar no debe cambiar el enfoque", 1,
+            regla.onAllNodesWithText("Enfoque: 3 m", substring = true).fetchSemanticsNodes().size)
     }
 
     @Test
