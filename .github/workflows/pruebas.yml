@@ -33,7 +33,16 @@ jobs:
           target: google_apis
           profile: pixel_6
           disable-animations: true
-          script: chmod +x gradlew && ./gradlew --no-daemon connectedDebugAndroidTest
+          script: |
+            chmod +x gradlew
+            adb logcat -c || true
+            ./gradlew --no-daemon connectedDebugAndroidTest || echo "PRUEBAS FALLIDAS"
+            echo "===== LOG GESTOS ====="
+            adb logcat -d -s Gestos:D | tail -n 80
+            echo "===== ERRORES ====="
+            adb logcat -d | grep -E "AndroidRuntime|FATAL|TestRunner.*(failed|finished)" | head -n 40
+            echo "===== RESULTADOS XML ====="
+            find app/build/outputs/androidTest-results -name "*.xml" -exec sed -n '1,80p' {} \;
 
       - uses: actions/upload-artifact@v4
         if: always()

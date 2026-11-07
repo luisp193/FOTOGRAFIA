@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -449,6 +450,7 @@ fun Foto(
                             while (true) {
                                 val evento = awaitPointerEvent()
                                 val pulsados = evento.changes.count { it.pressed }
+                                Log.d("Gestos", "evento tipo=${evento.type} pulsados=$pulsados cambios=${evento.changes.size} f=$f")
                                 if (pulsados >= 2) {
                                     dosDedos = true
                                     val centroide = evento.calculateCentroid(useCurrent = true)
@@ -459,6 +461,7 @@ fun Foto(
                                         val punto = c + (centroide - pan - medio) / escala(f)
                                         f = (f * cambio).coerceIn(FOCAL_FOTO.toFloat(), FOCAL_MAX)
                                         c = limitaCentro(punto - (centroide - medio) / escala(f), f / FOCAL_FOTO)
+                                        Log.d("Gestos", "zoom cambio=$cambio pan=$pan f=$f c=$c")
                                         onEncuadre(f, c)
                                     }
                                     evento.changes.forEach { if (it.positionChanged()) it.consume() }
