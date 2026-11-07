@@ -142,26 +142,18 @@ fun filaDe(distancia: Float) = HORIZONTE + KH / distancia
 val limitesFranjas = listOf(25f, 14f, 8f, 5f, 3.5f, 2.5f).map { filaDe(it) }
 val distanciaFranjas = listOf(50f, 18f, 10.5f, 6.3f, 4.2f, 3f, 2.2f)
 
+// Máscara de cada franja: desde su borde superior (difuminado) hasta abajo del todo.
+// Se dibujan de lejos a cerca, y cada franja tapa a la anterior, sin dejar rayas.
 fun mascaraFranja(i: Int): Array<Pair<Float, Color>> {
+    if (i == 0) return arrayOf(0f to Color.White, 1f to Color.White)
     val f = 20f
-    val arriba = if (i == 0) null else limitesFranjas[i - 1]
-    val abajo = if (i == distanciaFranjas.lastIndex) null else limitesFranjas[i]
-    val paradas = mutableListOf<Pair<Float, Color>>()
-    if (arriba == null) {
-        paradas += 0f to Color.White
-    } else {
-        paradas += 0f to Color.Transparent
-        paradas += (arriba - f) / FOTO_H to Color.Transparent
-        paradas += (arriba + f) / FOTO_H to Color.White
-    }
-    if (abajo == null) {
-        paradas += 1f to Color.White
-    } else {
-        paradas += (abajo - f) / FOTO_H to Color.White
-        paradas += (abajo + f) / FOTO_H to Color.Transparent
-        paradas += 1f to Color.Transparent
-    }
-    return paradas.toTypedArray()
+    val arriba = limitesFranjas[i - 1]
+    return arrayOf(
+        0f to Color.Transparent,
+        (arriba - f) / FOTO_H to Color.Transparent,
+        (arriba + f) / FOTO_H to Color.White,
+        1f to Color.White
+    )
 }
 
 // Personas recortadas: posición en la foto, distancia y punto de mira inicial
@@ -297,7 +289,7 @@ fun Simulador() {
 
     val controles: @Composable (Modifier) -> Unit = { mod ->
         Controles(
-            mod, focal, { focal = it }, enfoque, iVel, { iVel = it }, iDia, { iDia = it }, iIso, { iIso = it }
+            mod, focal, { focal = it; centro = mira }, enfoque, iVel, { iVel = it }, iDia, { iDia = it }, iIso, { iIso = it }
         )
     }
 
