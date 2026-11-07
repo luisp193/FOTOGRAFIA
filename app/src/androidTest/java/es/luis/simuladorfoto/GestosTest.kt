@@ -8,7 +8,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.performMultiTouchInput
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pinch
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -42,7 +42,7 @@ class GestosTest {
     fun pellizcarAmplia() {
         captura("1_inicio")
         val antes = textoObjetivo()
-        regla.onNodeWithTag("foto").performMultiTouchInput {
+        regla.onNodeWithTag("foto").performTouchInput {
             pinch(
                 start0 = center - Offset(40f, 0f), end0 = center - Offset(300f, 0f),
                 start1 = center + Offset(40f, 0f), end1 = center + Offset(300f, 0f),
