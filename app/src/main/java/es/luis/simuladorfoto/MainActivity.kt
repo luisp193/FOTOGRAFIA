@@ -200,14 +200,19 @@ fun mascaraFranja(i: Int): Array<Pair<Float, Color>> {
 }
 
 // Personas recortadas: posición en la foto, distancia y punto de mira inicial
-data class Capa(val archivo: String, val x: Float, val y: Float, val distancia: Float, val mira: Offset)
+// escala: píxeles de la imagen por cada píxel de la foto original (las capas están ampliadas
+// con superresolución para que no se pixelen con el tele)
+data class Capa(val archivo: String, val x: Float, val y: Float, val distancia: Float, val mira: Offset, val escala: Float)
 
 // De la más lejana a la más cercana (orden de dibujo)
 val capas = listOf(
-    Capa("p3.webp", 2075f, 200f, 10f, Offset(2145f, 300f)),
-    Capa("p2.webp", 1162f, 237f, 3f, Offset(1305f, 330f)),
-    Capa("p1.webp", 103f, 79f, 1f, Offset(430f, 330f))
+    Capa("p3.webp", 2075f, 200f, 10f, Offset(2145f, 300f), 4f),
+    Capa("p2.webp", 1162f, 237f, 3f, Offset(1305f, 330f), 4f),
+    Capa("p1.webp", 103f, 79f, 1f, Offset(430f, 330f), 2f)
 )
+
+// El fondo está al doble de resolución que la foto original
+const val ESCALA_FONDO = 2f
 
 class Recursos(private val ctx: Context) {
     private fun bitmap(nombre: String): Bitmap =
@@ -226,8 +231,8 @@ class Recursos(private val ctx: Context) {
             val b = personas[i]
             val muestras = listOf(Offset.Zero, Offset(12f, 0f), Offset(-12f, 0f), Offset(0f, 12f), Offset(0f, -12f))
             for (m in muestras) {
-                val x = (p.x + m.x - c.x).toInt()
-                val y = (p.y + m.y - c.y).toInt()
+                val x = ((p.x + m.x - c.x) * c.escala).toInt()
+                val y = ((p.y + m.y - c.y) * c.escala).toInt()
                 if (x in 0 until b.width && y in 0 until b.height && (b.getPixel(x, y) ushr 24) > 100) return i
             }
         }
@@ -577,13 +582,13 @@ fun Foto(
         fun radioX(dof: Float) = aDp(hypot(dof, temblor * 0.45f))
         fun radioY(dof: Float) = aDp(hypot(dof, temblor * 0.2f))
 
-        fun DrawScope.dibuja(img: ImageBitmap, x: Float, y: Float) {
+        fun DrawScope.dibuja(img: ImageBitmap, x: Float, y: Float, escala: Float) {
             drawImage(
                 img,
                 srcOffset = IntOffset.Zero,
                 srcSize = IntSize(img.width, img.height),
                 dstOffset = IntOffset((ox + x * s).roundToInt(), (oy + y * s).roundToInt()),
-                dstSize = IntSize((img.width * s).roundToInt(), (img.height * s).roundToInt()),
+                dstSize = IntSize((img.width / escala * s).roundToInt(), (img.height / escala * s).roundToInt()),
                 colorFilter = filtro
             )
         }
@@ -608,7 +613,7 @@ fun Foto(
                         .blur(radioX(dof), radioY(dof), BlurredEdgeTreatment.Rectangle)
                         .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
                 ) {
-                    dibuja(rec.fondo, 0f, 0f)
+                    dibuja(rec.fondo, 0f, 0f, ESCALA_FONDO)
                     drawRect(brush = mascara, blendMode = BlendMode.DstIn)
                 }
               }
@@ -622,7 +627,7 @@ fun Foto(
                         .fillMaxSize()
                         .blur(radioX(dof), radioY(dof), BlurredEdgeTreatment.Rectangle)
                 ) {
-                    dibuja(rec.imagenesPersonas[i], c.x, c.y)
+                    dibuja(rec.imagenesPersonas[i], c.x, c.y, c.escala)
                 }
             }
 
