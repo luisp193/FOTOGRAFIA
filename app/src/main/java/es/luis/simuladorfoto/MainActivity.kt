@@ -71,6 +71,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -430,6 +431,7 @@ fun Foto(
             Canvas(
                 Modifier
                     .fillMaxSize()
+                    .testTag("foto")
                     .pointerInput(dw, dh) {
                         awaitEachGesture {
                             val primero = awaitFirstDown(requireUnconsumed = false)
