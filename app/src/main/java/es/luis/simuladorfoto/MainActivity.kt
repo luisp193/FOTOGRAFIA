@@ -104,6 +104,11 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+// Solo para las pruebas en emulador, que no tiene tarjeta gráfica: sin desenfoque
+object Pruebas {
+    @Volatile var sinDesenfoque = false
+}
+
 // ---------- Valores de la cámara ----------
 
 val velocidades = listOf(
@@ -428,7 +433,7 @@ fun Foto(
         val ox = dw / 2 - centro.x * s
         val oy = dh / 2 - centro.y * s
         fun aPantalla(p: Offset) = Offset(ox + p.x * s, oy + p.y * s)
-        fun aDp(px: Float): Dp = with(density) { px.coerceIn(0f, 80f).toDp() }
+        fun aDp(px: Float): Dp = if (Pruebas.sinDesenfoque) 0.dp else with(density) { px.coerceIn(0f, 80f).toDp() }
 
         // Trepidación: trazo que deja el temblor de la mano mientras el obturador está abierto
         val k = focal / 1000f / SENSOR_ANCHO * dw
@@ -455,6 +460,7 @@ fun Foto(
         ) {
             // Fondo por franjas de distancia, cada una con su desenfoque
             distanciaFranjas.forEachIndexed { i, d ->
+                if (Pruebas.sinDesenfoque && i > 0) return@forEachIndexed
                 val dof = desenfoquePx(d, enfoque, n, focal, dw)
                 val mascara = Brush.verticalGradient(
                     *mascaraFranja(i), startY = oy, endY = oy + FOTO_H * s

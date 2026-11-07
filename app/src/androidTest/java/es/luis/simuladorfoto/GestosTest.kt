@@ -18,12 +18,21 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.services.storage.TestStorage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.BeforeClass
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class GestosTest {
+    companion object {
+        @JvmStatic
+        @BeforeClass
+        fun antes() {
+            Pruebas.sinDesenfoque = true
+        }
+    }
+
     @get:Rule
     val regla = createAndroidComposeRule<MainActivity>()
 
