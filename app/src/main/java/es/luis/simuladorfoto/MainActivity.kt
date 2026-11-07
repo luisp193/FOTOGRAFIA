@@ -13,7 +13,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -39,7 +41,6 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -115,6 +116,7 @@ val isos = listOf(100, 200, 400, 800, 1600, 3200, 6400, 12800)
 // La foto está hecha con un 24 mm; más angular no se puede y más allá de 85 mm se pixela
 const val FOCAL_FOTO = 24
 val focales = listOf(24, 35, 50, 85)
+const val FOCAL_MAX = 85f
 
 const val SENSOR_ANCHO = 0.036f   // foto horizontal de formato completo: 36 mm de ancho
 const val PULSO = 0.035f          // temblor de la mano (rad/s): da la regla de 1/focal
@@ -205,7 +207,7 @@ fun creaRuido(): ImageBitmap {
 // ---------- Cálculos ----------
 
 // Radio de desenfoque (círculo de confusión) en píxeles de pantalla
-fun desenfoquePx(d: Float, enfoque: Float, n: Float, focalMm: Int, anchoPx: Float): Float {
+fun desenfoquePx(d: Float, enfoque: Float, n: Float, focalMm: Float, anchoPx: Float): Float {
     val f = focalMm / 1000f
     val c = f * f / n * abs(d - enfoque) / (d * (enfoque - f))
     return c / SENSOR_ANCHO * anchoPx / 2f
@@ -227,6 +229,13 @@ fun textoMetros(d: Float): String =
 
 fun textoDiafragma(n: Float): String =
     if (n % 1f == 0f) n.toInt().toString() else n.toString().replace('.', ',')
+
+// Que la parte visible no se salga de la foto
+fun limitaCentro(c: Offset, zoom: Float): Offset {
+    val sw = FOTO_W / zoom / 2
+    val sh = FOTO_H / zoom / 2
+    return Offset(c.x.coerceIn(sw, FOTO_W - sw), c.y.coerceIn(sh, FOTO_H - sh))
+}
 
 // Histograma de luminancia de la parte de la foto que se ve
 fun histogramaVisible(luma: ByteArray, centro: Offset, zoom: Float): IntArray {
@@ -259,7 +268,7 @@ fun Simulador() {
     var iVel by remember { mutableFloatStateOf(5f) }   // 1/125
     var iDia by remember { mutableFloatStateOf(4f) }   // f/5.6
     var iIso by remember { mutableFloatStateOf(0f) }   // ISO 100
-    var focal by remember { mutableIntStateOf(FOCAL_FOTO) }
+    var focal by remember { mutableFloatStateOf(FOCAL_FOTO.toFloat()) }
     var enfoque by remember { mutableFloatStateOf(3f) }
     var mira by remember { mutableStateOf(capas[1].mira) }
     var centro by remember { mutableStateOf(Offset(FOTO_W / 2, FOTO_H / 2)) }
@@ -276,13 +285,7 @@ fun Simulador() {
     val factor = 2f.pow(ev / 2.2f)
     val filtro = ColorFilter.colorMatrix(ColorMatrix().apply { setToScale(factor, factor, factor, 1f) })
 
-    // Que la parte visible no se salga de la foto al cambiar el zoom
-    fun limita(c: Offset, z: Float): Offset {
-        val sw = FOTO_W / z / 2
-        val sh = FOTO_H / z / 2
-        return Offset(c.x.coerceIn(sw, FOTO_W - sw), c.y.coerceIn(sh, FOTO_H - sh))
-    }
-    val centroOk = limita(centro, zoom)
+    val centroOk = limitaCentro(centro, zoom)
 
     val base = remember(centroOk, zoom) { histogramaVisible(rec.luma, centroOk, zoom) }
     val hist = remember(base, factor) { histogramaExpuesto(base, factor) }
@@ -302,7 +305,8 @@ fun Simulador() {
         val horizontal = maxWidth > maxHeight
         val foto: @Composable (Modifier) -> Unit = { mod ->
             Foto(
-                mod, rec, focal, zoom, centroOk, { c -> centro = limita(c, zoom) },
+                mod, rec, focal, zoom, centroOk,
+                { f, c -> focal = f; centro = limitaCentro(c, f / FOCAL_FOTO) },
                 enfoque, n, t, filtro, iso, mira,
                 onEnfoca = { d, p -> enfoque = d; mira = p },
                 ev, hist, verHistograma, { verHistograma = it }
@@ -326,10 +330,10 @@ fun Simulador() {
 fun Foto(
     modifier: Modifier,
     rec: Recursos,
-    focal: Int,
+    focal: Float,
     zoom: Float,
     centro: Offset,
-    onCentro: (Offset) -> Unit,
+    onEncuadre: (Float, Offset) -> Unit,
     enfoque: Float,
     n: Float,
     t: Float,
@@ -354,11 +358,10 @@ fun Foto(
         val oy = dh / 2 - centro.y * s
         fun aPantalla(p: Offset) = Offset(ox + p.x * s, oy + p.y * s)
         fun aDp(px: Float): Dp = with(density) { px.coerceIn(0f, 80f).toDp() }
-        // Valores actuales para el gesto, que no se reinicia al mover la foto
+        // Valores actuales para el gesto, que no se reinicia al mover o ampliar la foto
         val centroActual by rememberUpdatedState(centro)
-        val semiW = FOTO_W / zoom / 2
-        val semiH = FOTO_H / zoom / 2
-        fun limita(c: Offset) = Offset(c.x.coerceIn(semiW, FOTO_W - semiW), c.y.coerceIn(semiH, FOTO_H - semiH))
+        val focalActual by rememberUpdatedState(focal)
+        fun escala(f: Float) = dw * (f / FOCAL_FOTO) / FOTO_W
 
         // Trepidación: trazo que deja el temblor de la mano mientras el obturador está abierto
         val k = focal / 1000f / SENSOR_ANCHO * dw
@@ -423,35 +426,44 @@ fun Foto(
                 }
             }
 
-            // Punto de mira. Un dedo: tocar para enfocar. Dos dedos: mover la foto con zoom.
+            // Punto de mira. Un dedo: tocar para enfocar. Dos dedos: pellizcar para el zoom y arrastrar para mover.
             Canvas(
                 Modifier
                     .fillMaxSize()
-                    .pointerInput(dw, dh, zoom) {
+                    .pointerInput(dw, dh) {
                         awaitEachGesture {
                             val primero = awaitFirstDown(requireUnconsumed = false)
                             val inicio = primero.position
                             var dosDedos = false
-                            var c = limita(centroActual)
+                            var f = focalActual
+                            var c = limitaCentro(centroActual, f / FOCAL_FOTO)
+                            val medio = Offset(dw / 2, dh / 2)
                             while (true) {
                                 val evento = awaitPointerEvent()
                                 val pulsados = evento.changes.count { it.pressed }
                                 if (pulsados >= 2) {
                                     dosDedos = true
-                                    val pan = evento.calculatePan()
-                                    if (zoom > 1f && pan != Offset.Zero) {
-                                        c = limita(c - pan / s)
-                                        onCentro(c)
+                                    val centroide = evento.calculateCentroid(useCurrent = true)
+                                    if (centroide != Offset.Unspecified) {
+                                        val pan = evento.calculatePan()
+                                        val cambio = evento.calculateZoom()
+                                        // El punto de la foto que estaba bajo los dedos sigue bajo los dedos
+                                        val punto = c + (centroide - pan - medio) / escala(f)
+                                        f = (f * cambio).coerceIn(FOCAL_FOTO.toFloat(), FOCAL_MAX)
+                                        c = limitaCentro(punto - (centroide - medio) / escala(f), f / FOCAL_FOTO)
+                                        onEncuadre(f, c)
                                     }
                                     evento.changes.forEach { if (it.positionChanged()) it.consume() }
                                 }
                                 if (pulsados == 0) {
                                     val fin = evento.changes.firstOrNull { it.id == primero.id }?.position ?: inicio
                                     if (!dosDedos && (fin - inicio).getDistance() < viewConfiguration.touchSlop) {
-                                        val actual = limita(centroActual)
+                                        val fa = focalActual
+                                        val sa = escala(fa)
+                                        val actual = limitaCentro(centroActual, fa / FOCAL_FOTO)
                                         val p = Offset(
-                                            (fin.x - (dw / 2 - actual.x * s)) / s,
-                                            (fin.y - (dh / 2 - actual.y * s)) / s
+                                            (fin.x - (dw / 2 - actual.x * sa)) / sa,
+                                            (fin.y - (dh / 2 - actual.y * sa)) / sa
                                         )
                                         val persona = rec.personaEn(p)
                                         val d = if (persona != null) capas[persona].distancia else distanciaSuelo(p.y)
@@ -548,8 +560,8 @@ fun Histograma(hist: IntArray, ev: String, modifier: Modifier) {
 @Composable
 fun Controles(
     modifier: Modifier,
-    focal: Int,
-    onFocal: (Int) -> Unit,
+    focal: Float,
+    onFocal: (Float) -> Unit,
     enfoque: Float,
     iVel: Float,
     onVel: (Float) -> Unit,
@@ -566,6 +578,7 @@ fun Controles(
     val segura = velocidades.filter { it <= 1f / focal }.maxOrNull() ?: velocidades.first()
     val etiquetaSegura = etiquetasVel[velocidades.indexOf(segura)]
     val movida = t > 1f / focal
+    val mm = focal.roundToInt()
 
     Column(
         modifier
@@ -574,7 +587,7 @@ fun Controles(
     ) {
         Text(
             "Enfoque: ${textoMetros(enfoque)} m · toca la foto para enfocar" +
-                if (focal > FOCAL_FOTO) " · dos dedos para mover" else "",
+                " · dos dedos para el zoom y mover",
             color = Color.LightGray,
             style = MaterialTheme.typography.bodySmall
         )
@@ -585,19 +598,19 @@ fun Controles(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Text("Objetivo", color = Color.White)
+            Text("Objetivo: $mm mm", color = Color.White)
             focales.forEach { f ->
                 FilterChip(
-                    selected = f == focal,
-                    onClick = { onFocal(f) },
+                    selected = abs(focal - f) < 0.5f,
+                    onClick = { onFocal(f.toFloat()) },
                     label = { Text("$f mm") }
                 )
             }
         }
         Text("Velocidad: ${etiquetasVel[iVel.roundToInt()]} s", color = Color.White)
         Text(
-            if (movida) "⚠ Foto movida por el pulso: con $focal mm usa $etiquetaSegura s o más rápida"
-            else "A pulso con $focal mm: $etiquetaSegura s o más rápida",
+            if (movida) "⚠ Foto movida por el pulso: con $mm mm usa $etiquetaSegura s o más rápida"
+            else "A pulso con $mm mm: $etiquetaSegura s o más rápida",
             color = if (movida) Color(0xFFFFB300) else Color.Gray,
             style = MaterialTheme.typography.bodySmall
         )
