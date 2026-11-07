@@ -174,7 +174,7 @@ val capas = listOf(
     Capa("p1.webp", 103f, 79f, 1f, Offset(430f, 330f))
 )
 
-class Recursos(ctx: Context) {
+class Recursos(private val ctx: Context) {
     private fun bitmap(nombre: String): Bitmap =
         ctx.assets.open(nombre).use { BitmapFactory.decodeStream(it) }
 
