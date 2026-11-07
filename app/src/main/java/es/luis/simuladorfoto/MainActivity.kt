@@ -460,7 +460,7 @@ fun Foto(
         ) {
             // Fondo por franjas de distancia, cada una con su desenfoque
             distanciaFranjas.forEachIndexed { i, d ->
-                if (Pruebas.sinDesenfoque && i > 0) return@forEachIndexed
+              if (!Pruebas.sinDesenfoque || i == 0) {
                 val dof = desenfoquePx(d, enfoque, n, focal, dw)
                 val mascara = Brush.verticalGradient(
                     *mascaraFranja(i), startY = oy, endY = oy + FOTO_H * s
@@ -474,6 +474,7 @@ fun Foto(
                     dibuja(rec.fondo, 0f, 0f)
                     drawRect(brush = mascara, blendMode = BlendMode.DstIn)
                 }
+              }
             }
 
             // Personas, de la más lejana a la más cercana
