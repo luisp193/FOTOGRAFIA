@@ -131,7 +131,7 @@ val isos = listOf(100, 200, 400, 800, 1600, 3200, 6400, 12800)
 // La foto está hecha con un 24 mm, así que no se puede ir más angular.
 // A 200 mm se ve solo una parte pequeña de la foto ampliada, y pierde nitidez.
 const val FOCAL_FOTO = 24
-val focales = listOf(24, 50, 85, 200)
+val focales = listOf(24, 50, 70, 200)
 const val FOCAL_MAX = 200f
 
 const val SENSOR_ANCHO = 0.036f   // foto horizontal de formato completo: 36 mm de ancho
