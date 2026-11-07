@@ -18,6 +18,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.services.storage.TestStorage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.BeforeClass
 import org.junit.Rule
 import org.junit.Test
@@ -70,6 +71,22 @@ class GestosTest {
         captura("2_tras_pellizco")
         println("OBJETIVO antes=[$antes] despues=[$despues]")
         assertNotEquals("El pellizco no cambia el objetivo", antes, despues)
+    }
+
+    @Test
+    fun histogramaQuemado() {
+        // La curva de la cámara tiene que compilar en Android 13 o superior
+        assertTrue("La curva de exposición no compila", Revelado.conCurva())
+        val ctx = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
+        val rgb = ctx.assets.open("rgb.bin").use { it.readBytes() }
+        val centro = Offset(FOTO_W / 2, FOTO_H / 2)
+        fun derecha(ev: Float): Float {
+            val h = histogramaVisible(rgb, centro, 1f, ev)
+            return (252..255).sumOf { h[it] }.toFloat() / h.sum()
+        }
+        println("HISTOGRAMA derecha a 0 EV=${derecha(0f)} a +1=${derecha(1f)} a +2,9=${derecha(2.9f)}")
+        assertTrue("A 0 EV no debería haber casi nada quemado", derecha(0f) < 0.05f)
+        assertTrue("A +2,9 EV casi todo debería estar a la derecha", derecha(2.9f) > 0.6f)
     }
 
     @Test

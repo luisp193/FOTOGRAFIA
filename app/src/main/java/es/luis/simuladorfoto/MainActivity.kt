@@ -3,7 +3,10 @@ package es.luis.simuladorfoto
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.RuntimeShader
+import android.os.Build
 import android.os.Bundle
+import androidx.annotation.RequiresApi
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -66,6 +69,7 @@ import androidx.compose.ui.graphics.ImageShader
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -134,8 +138,9 @@ const val PULSO = 0.035f          // temblor de la mano (rad/s): da la regla de 
 
 const val FOTO_W = 2576f
 const val FOTO_H = 1438f
-const val LUMA_W = 320
-const val LUMA_H = 179
+// Copia reducida de la foto en RGB para el histograma
+const val RGB_W = 320
+const val RGB_H = 179
 
 // Geometría del suelo de la plaza (medida en la foto con las personas a 3 y 10 m):
 // distancia = KH / (fila - HORIZONTE)
@@ -184,7 +189,7 @@ class Recursos(private val ctx: Context) {
     val fondo: ImageBitmap = bitmap("fondo.jpg").asImageBitmap()
     val personas: List<Bitmap> = capas.map { bitmap(it.archivo) }
     val imagenesPersonas: List<ImageBitmap> = personas.map { it.asImageBitmap() }
-    val luma: ByteArray = ctx.assets.open("luma.bin").use { it.readBytes() }
+    val rgb: ByteArray = ctx.assets.open("rgb.bin").use { it.readBytes() }
     val ruido: ImageBitmap = creaRuido()
 
     // ¿Hay una persona en este punto de la foto? Se mira primero la más cercana.
@@ -246,24 +251,95 @@ fun limitaCentro(c: Offset, zoom: Float): Offset {
     return Offset(c.x.coerceIn(sw, FOTO_W - sw), c.y.coerceIn(sh, FOTO_H - sh))
 }
 
-// Histograma de luminancia de la parte de la foto que se ve
-fun histogramaVisible(luma: ByteArray, centro: Offset, zoom: Float): IntArray {
-    val h = IntArray(256)
-    val ex = LUMA_W / FOTO_W
-    val semiW = FOTO_W / zoom / 2 * ex
-    val semiH = FOTO_H / zoom / 2 * ex
-    val x0 = (centro.x * ex - semiW).toInt().coerceIn(0, LUMA_W - 1)
-    val x1 = (centro.x * ex + semiW).toInt().coerceIn(x0 + 1, LUMA_W)
-    val y0 = (centro.y * ex - semiH).toInt().coerceIn(0, LUMA_H - 1)
-    val y1 = (centro.y * ex + semiH).toInt().coerceIn(y0 + 1, LUMA_H)
-    for (y in y0 until y1) for (x in x0 until x1) h[luma[y * LUMA_W + x].toInt() and 0xFF]++
-    return h
+// ---------- Revelado: exposición con la curva de la cámara ----------
+// Como en una cámara: la luz se multiplica en lineal y las altas luces se comprimen
+// (hombro) antes de quemarse. Se aplica sobre la foto ya desenfocada, igual que el sensor.
+const val HOMBRO = 0.85f
+const val TECHO = 1.05f
+
+const val AGSL_EXPOSICION = """
+uniform shader contenido;
+uniform half factor;
+half4 main(float2 p) {
+    half4 c = contenido.eval(p);
+    half3 lin = toLinearSrgb(c.rgb) * factor;
+    half3 hombro = 0.85 + 0.2 * (1.0 - exp(-(lin - 0.85) / 0.2));
+    lin = mix(lin, hombro, step(half3(0.85), lin));
+    return half4(fromLinearSrgb(min(lin, half3(1.0))), c.a);
+}
+"""
+
+object Revelado {
+    private var probado = false
+    private var hayCurva = false
+
+    // La curva necesita Android 13; en Android 12 se usa una multiplicación simple
+    fun conCurva(): Boolean {
+        if (!probado) {
+            probado = true
+            hayCurva = Build.VERSION.SDK_INT >= 33 && compila()
+        }
+        return hayCurva
+    }
+
+    @RequiresApi(33)
+    private fun compilaShader() = RuntimeShader(AGSL_EXPOSICION)
+
+    private fun compila(): Boolean = try {
+        if (Build.VERSION.SDK_INT >= 33) { compilaShader(); true } else false
+    } catch (e: Throwable) {
+        false
+    }
+
+    fun efecto(ev: Float): androidx.compose.ui.graphics.RenderEffect? =
+        if (conCurva() && Build.VERSION.SDK_INT >= 33) efecto33(ev) else null
+
+    @RequiresApi(33)
+    private fun efecto33(ev: Float): androidx.compose.ui.graphics.RenderEffect {
+        val sh = RuntimeShader(AGSL_EXPOSICION)
+        sh.setFloatUniform("factor", 2f.pow(ev))
+        return android.graphics.RenderEffect.createRuntimeShaderEffect(sh, "contenido").asComposeRenderEffect()
+    }
+
+    // Lo mismo que hace la pantalla, para un valor sRGB de 0 a 1
+    fun aplica(v: Float, ev: Float): Float {
+        if (!conCurva()) return (v * 2f.pow(ev / 2.2f)).coerceAtMost(1f)
+        var l = aLineal(v) * 2f.pow(ev)
+        if (l > HOMBRO) l = HOMBRO + (TECHO - HOMBRO) * (1f - kotlin.math.exp(-(l - HOMBRO) / (TECHO - HOMBRO)))
+        return aSrgb(l.coerceAtMost(1f))
+    }
+
+    private fun aLineal(x: Float) = if (x <= 0.04045f) x / 12.92f else ((x + 0.055f) / 1.055f).pow(2.4f)
+    private fun aSrgb(x: Float) = if (x <= 0.0031308f) x * 12.92f else 1.055f * x.pow(1f / 2.4f) - 0.055f
 }
 
-// Aplica la exposición (factor sobre los valores de la imagen) al histograma
-fun histogramaExpuesto(base: IntArray, factor: Float): IntArray {
+// Histograma de luminancia de la parte de la foto que se ve, con la exposición aplicada
+// a cada canal (rojo, verde y azul) como en la imagen, y quemando cada uno en 255.
+fun histogramaVisible(rgb: ByteArray, centro: Offset, zoom: Float, ev: Float): IntArray {
+    val tabla = FloatArray(257) { Revelado.aplica(it.coerceAtMost(255) / 255f, ev) * 255f }
     val h = IntArray(256)
-    for (v in 0..255) h[(v * factor).roundToInt().coerceIn(0, 255)] += base[v]
+    val ex = RGB_W / FOTO_W
+    val semiW = FOTO_W / zoom / 2 * ex
+    val semiH = FOTO_H / zoom / 2 * ex
+    val x0 = (centro.x * ex - semiW).toInt().coerceIn(0, RGB_W - 1)
+    val x1 = (centro.x * ex + semiW).toInt().coerceIn(x0 + 1, RGB_W)
+    val y0 = (centro.y * ex - semiH).toInt().coerceIn(0, RGB_H - 1)
+    val y1 = (centro.y * ex + semiH).toInt().coerceIn(y0 + 1, RGB_H)
+    var semilla = 12345
+    // Interpola entre valores vecinos con un poco de azar para que no salgan huecos en peine
+    fun canal(v: Int): Float {
+        semilla = semilla * 1103515245 + 12345
+        val f = ((semilla ushr 8) and 0xFFFF) / 65536f
+        return tabla[v] + f * (tabla[v + 1] - tabla[v])
+    }
+    for (y in y0 until y1) for (x in x0 until x1) {
+        val i = (y * RGB_W + x) * 3
+        val r = canal(rgb[i].toInt() and 0xFF)
+        val g = canal(rgb[i + 1].toInt() and 0xFF)
+        val b = canal(rgb[i + 2].toInt() and 0xFF)
+        val lum = 0.2126f * r + 0.7152f * g + 0.0722f * b
+        h[lum.toInt().coerceIn(0, 255)]++
+    }
     return h
 }
 
@@ -302,13 +378,15 @@ fun Simulador(onCuestionarios: () -> Unit) {
     // Exposición correcta de referencia: 1/125, f/5.6, ISO 100
     val ev = log2((t / (1 / 125f)) * (iso / 100f) / ((n / 5.6f) * (n / 5.6f))).coerceIn(-10f, 10f)
     // La foto está en sRGB: un paso de luz multiplica sus valores por unos 2^(1/2,2)
+    // Con Android 13 o superior la exposición la aplica la curva de la cámara sobre la foto entera;
+    // en Android 12, una multiplicación simple en cada capa
     val factor = 2f.pow(ev / 2.2f)
-    val filtro = ColorFilter.colorMatrix(ColorMatrix().apply { setToScale(factor, factor, factor, 1f) })
+    val filtro = if (Revelado.conCurva()) null
+        else ColorFilter.colorMatrix(ColorMatrix().apply { setToScale(factor, factor, factor, 1f) })
 
     val centroOk = limitaCentro(centro, zoom)
 
-    val base = remember(centroOk, zoom) { histogramaVisible(rec.luma, centroOk, zoom) }
-    val hist = remember(base, factor) { histogramaExpuesto(base, factor) }
+    val hist = remember(centroOk, zoom, ev) { histogramaVisible(rec.rgb, centroOk, zoom, ev) }
 
     val controles: @Composable (Modifier) -> Unit = { mod ->
         Controles(
@@ -358,7 +436,7 @@ fun Foto(
     enfoque: Float,
     n: Float,
     t: Float,
-    filtro: ColorFilter,
+    filtro: ColorFilter?,
     iso: Int,
     mira: Offset,
     onEnfoca: (Float, Offset) -> Unit,
@@ -458,6 +536,8 @@ fun Foto(
                 .size(with(density) { dw.toDp() }, with(density) { dh.toDp() })
                 .clipToBounds()
         ) {
+          val revelado = remember(ev) { Revelado.efecto(ev) }
+          Box(Modifier.fillMaxSize().graphicsLayer { renderEffect = revelado }) {
             // Fondo por franjas de distancia, cada una con su desenfoque
             distanciaFranjas.forEachIndexed { i, d ->
               if (!Pruebas.sinDesenfoque || i == 0) {
@@ -500,6 +580,7 @@ fun Foto(
                     )
                 }
             }
+          }
 
             // Punto de mira (los gestos se recogen en toda la zona de la foto, más abajo)
             Canvas(Modifier.fillMaxSize()) {
@@ -549,30 +630,31 @@ fun Histograma(hist: IntArray, ev: String, modifier: Modifier) {
             .padding(6.dp)
     ) {
         Canvas(Modifier.fillMaxSize()) {
-            val total = hist.sum().coerceAtLeast(1)
-            val maxRef = (1..254).maxOf { hist[it] }.coerceAtLeast(1)
+            // 64 columnas; altura en raíz cuadrada para que se vea lo que no está quemado
+            // aunque la columna de la derecha sea enorme
+            val columnas = 64
+            val alturas = FloatArray(columnas) { c ->
+                var suma = 0
+                for (v in c * 4 until c * 4 + 4) suma += hist[v]
+                kotlin.math.sqrt(suma.toFloat())
+            }
+            val maximo = (alturas.maxOrNull() ?: 1f).coerceAtLeast(1f)
             for (q in 1..3) {
                 val x = size.width * q / 4
                 drawLine(Color.White.copy(alpha = 0.2f), Offset(x, 0f), Offset(x, size.height), 1f)
             }
+            val ancho = size.width / columnas
             val camino = Path().apply {
                 moveTo(0f, size.height)
-                for (i in 0..255) {
-                    val x = i / 255f * size.width
-                    val y = size.height * (1f - (hist[i].toFloat() / maxRef).coerceAtMost(1f))
-                    lineTo(x, y)
+                for (c in 0 until columnas) {
+                    val y = size.height * (1f - alturas[c] / maximo)
+                    lineTo(c * ancho, y)
+                    lineTo((c + 1) * ancho, y)
                 }
                 lineTo(size.width, size.height)
                 close()
             }
             drawPath(camino, Color.White.copy(alpha = 0.85f))
-            // Avisos de luces quemadas (rojo) y sombras empastadas (azul)
-            if (hist[255].toFloat() / total > 0.005f) {
-                drawRect(Color(0xFFE53935), topLeft = Offset(size.width - 4.dp.toPx(), 0f), size = Size(4.dp.toPx(), size.height))
-            }
-            if (hist[0].toFloat() / total > 0.005f) {
-                drawRect(Color(0xFF42A5F5), topLeft = Offset.Zero, size = Size(4.dp.toPx(), size.height))
-            }
         }
         Text(
             ev,
