@@ -12,6 +12,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.swipe
 import androidx.compose.ui.test.performTextReplacement
@@ -172,7 +173,8 @@ class GestosTest {
                 else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         }
         regla.waitUntil(timeoutMillis = 30_000) {
-            val t = regla.onRoot().fetchSemanticsNode().size
+            // con un diálogo abierto hay más de una raíz: vale la primera (la pantalla)
+            val t = regla.onAllNodes(isRoot()).fetchSemanticsNodes().first().size
             (t.width > t.height) == si
         }
         regla.waitForIdle()
@@ -207,13 +209,13 @@ class GestosTest {
         regla.waitForIdle()
         assertEquals("1/250 s", estado("dialVelocidad"))
         assertEquals("200", estado("dialIso"))
-        assertEquals(1, regla.onAllNodesWithText("±0,0 EV").fetchSemanticsNodes().size)
+        assertEquals("±0,0 EV", estado("exposicion"))
         // En manual, abrir el diafragma un paso sube la exposición un paso
         regla.onNodeWithTag("modoM").performClick()
         regla.onAllNodesWithText("−")[1].performClick()
         regla.waitForIdle()
         assertEquals("f/4", estado("dialDiafragma"))
-        assertEquals(1, regla.onAllNodesWithText("+1,0 EV").fetchSemanticsNodes().size)
+        assertEquals("+1,0 EV", estado("exposicion"))
         captura("8_modos")
     }
 
@@ -250,7 +252,12 @@ class GestosTest {
             captura("9e_horizontal")
             regla.onNodeWithText("Opciones").performClick()
             regla.waitForIdle()
-            captura("9f_opciones")
+            regla.onNodeWithText("Balance de blancos").assertExists()
+            regla.onNodeWithText("Cerrar").performClick()
+            regla.waitForIdle()
+            // el histograma se guarda en el móvil: se deja cerrado para las demás pruebas
+            regla.onNodeWithTag("exposicion").performClick()
+            regla.waitForIdle()
         } finally {
             Pruebas.sinDesenfoque = true
             horizontal(false)

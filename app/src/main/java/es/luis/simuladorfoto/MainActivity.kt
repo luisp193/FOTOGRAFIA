@@ -219,6 +219,7 @@ fun FranjaInfo(cam: Camara, modifier: Modifier) {
                 .clip(RoundedCornerShape(6.dp))
                 .clickable { cam.verHistograma = !cam.verHistograma; cam.guardaOpciones() }
                 .testTag("exposicion")
+                .semantics { stateDescription = textoEv(cam.ev) }
                 .padding(horizontal = 6.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
