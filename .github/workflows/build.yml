@@ -44,3 +44,17 @@ jobs:
             --title "Simulador Foto $TAG" \
             --notes "APK compilado automáticamente. Descarga simulador-foto.apk e instálalo (se puede instalar encima de la versión anterior)." \
             --latest
+
+      # En otras ramas (lanzado a mano) se publica como versión de prueba:
+      # la web sigue descargando la última versión de main
+      - name: Publicar versión de prueba
+        if: github.ref != 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="prueba-${{ github.run_number }}"
+          gh release create "$TAG" simulador-foto.apk \
+            --target "${{ github.sha }}" \
+            --title "Prueba $TAG" \
+            --notes "Versión de prueba, todavía sin publicar. La web sigue descargando la última versión normal." \
+            --prerelease --latest=false

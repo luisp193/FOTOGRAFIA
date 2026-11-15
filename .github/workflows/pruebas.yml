@@ -5,10 +5,13 @@ on:
     branches: [ 'prueba-*' ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   emulador:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -52,3 +55,18 @@ jobs:
             app/build/reports/androidTests/
             app/build/outputs/connected_android_test_additional_output/
             app/build/outputs/androidTest-results/
+
+      # Las capturas van también a la rama "capturas", para verlas sin descargar el artefacto
+      - name: Publicar capturas en una rama
+        if: always()
+        run: |
+          mkdir -p /tmp/capturas
+          find app/build/outputs/connected_android_test_additional_output -name "*.png" -exec cp {} /tmp/capturas/ \; || true
+          cd /tmp/capturas
+          ls -la
+          git init -q -b capturas
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Capturas de ${GITHUB_SHA}" || exit 0
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" capturas:capturas
