@@ -3,6 +3,7 @@ package es.luis.simuladorfoto
 import android.graphics.Bitmap
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -120,8 +121,10 @@ class GestosTest {
         val ctx = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
         val rgb = ctx.assets.open("rgb.bin").use { it.readBytes() }
         val centro = Offset(FOTO_W / 2, FOTO_H / 2)
+        // El desenfoque de objetivo también tiene que compilar
+        assertTrue("El desenfoque de objetivo no compila", Bokeh.disponible())
         fun derecha(ev: Float): Float {
-            val h = histogramaVisible(rgb, centro, 1f, ev)
+            val h = histogramas(rgb, centro, 1f, ev).l
             return (252..255).sumOf { h[it] }.toFloat() / h.sum()
         }
         println("HISTOGRAMA derecha a 0 EV=${derecha(0f)} a +1=${derecha(1f)} a +2,9=${derecha(2.9f)}")
@@ -156,5 +159,101 @@ class GestosTest {
         captura("3_enfoque_1m")
         val enfoque = regla.onAllNodesWithText("Enfoque: 1 m", substring = true).fetchSemanticsNodes().size
         assertEquals("No enfoca a 1 m al tocar al hombre", 1, enfoque)
+    }
+
+    private fun estado(tag: String): String =
+        regla.onNodeWithTag(tag).fetchSemanticsNode().config
+            .getOrElse(androidx.compose.ui.semantics.SemanticsProperties.StateDescription) { "" }
+
+    private fun horizontal(si: Boolean) {
+        regla.runOnUiThread {
+            regla.activity.requestedOrientation =
+                if (si) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+        regla.waitUntil(timeoutMillis = 30_000) {
+            val t = regla.onRoot().fetchSemanticsNode().size
+            (t.width > t.height) == si
+        }
+        regla.waitForIdle()
+    }
+
+    // En horizontal, los tres controles de la exposición tienen que verse enteros
+    @Test
+    fun horizontalControlesVisibles() {
+        try {
+            horizontal(true)
+            captura("7_horizontal")
+            val raiz = regla.onRoot().fetchSemanticsNode().size
+            for (tag in listOf("dialVelocidad", "dialDiafragma", "dialIso")) {
+                regla.onNodeWithTag(tag).assertIsDisplayed()
+                val r = regla.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+                println("HORIZONTAL $tag $r de $raiz")
+                assertTrue(
+                    "$tag se sale de la pantalla en horizontal",
+                    r.top >= 0f && r.bottom <= raiz.height && r.right <= raiz.width
+                )
+            }
+        } finally {
+            horizontal(false)
+        }
+    }
+
+    @Test
+    fun modosAutomaticos() {
+        // Prioridad de diafragma: al subir el ISO un paso, la cámara acorta la velocidad un paso
+        regla.onNodeWithTag("modoA").performClick()
+        regla.onAllNodesWithText("+")[2].performClick()
+        regla.waitForIdle()
+        assertEquals("1/250 s", estado("dialVelocidad"))
+        assertEquals("200", estado("dialIso"))
+        assertEquals(1, regla.onAllNodesWithText("±0,0 EV").fetchSemanticsNodes().size)
+        // En manual, abrir el diafragma un paso sube la exposición un paso
+        regla.onNodeWithTag("modoM").performClick()
+        regla.onAllNodesWithText("−")[1].performClick()
+        regla.waitForIdle()
+        assertEquals("f/4", estado("dialDiafragma"))
+        assertEquals(1, regla.onAllNodesWithText("+1,0 EV").fetchSemanticsNodes().size)
+        captura("8_modos")
+    }
+
+    // Con el desenfoque de objetivo de verdad (lento en el emulador, que no tiene tarjeta gráfica):
+    // comprueba que no falla al dibujar y deja capturas
+    @Test
+    fun capturasConDesenfoque() {
+        try {
+            Pruebas.sinDesenfoque = false
+            regla.waitForIdle()
+            regla.onNodeWithTag("exposicion").performClick()
+            captura("9a_inicio")
+            // f/1,4 enfocando al hombre de 1 m
+            repeat(4) { regla.onAllNodesWithText("−")[1].performClick() }
+            regla.onNodeWithTag("foto").performTouchInput {
+                val dw = minOf(width.toFloat(), height * FOTO_W / FOTO_H)
+                val dh = dw * FOTO_H / FOTO_W
+                click(Offset((width - dw) / 2 + 430f / FOTO_W * dw, (height - dh) / 2 + 330f / FOTO_H * dh))
+            }
+            regla.waitForIdle()
+            captura("9b_f14_1m")
+            regla.onNodeWithText("70 mm").performClick()
+            regla.waitForIdle()
+            captura("9c_70mm")
+            // ISO alto en prioridad de diafragma, con el histograma por canales
+            regla.onNodeWithText("24 mm").performClick()
+            regla.onNodeWithTag("modoA").performClick()
+            repeat(7) { regla.onAllNodesWithText("+")[2].performClick() }
+            regla.onNodeWithTag("histograma").performClick()
+            regla.onNodeWithTag("histograma").performClick()
+            regla.waitForIdle()
+            captura("9d_iso")
+            horizontal(true)
+            captura("9e_horizontal")
+            regla.onNodeWithText("Opciones").performClick()
+            regla.waitForIdle()
+            captura("9f_opciones")
+        } finally {
+            Pruebas.sinDesenfoque = true
+            horizontal(false)
+        }
     }
 }
