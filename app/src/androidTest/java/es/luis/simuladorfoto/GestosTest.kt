@@ -228,7 +228,8 @@ class GestosTest {
             regla.waitForIdle()
             regla.onNodeWithTag("exposicion").performClick()
             captura("9a_inicio")
-            // f/1,4 enfocando al hombre de 1 m
+            // f/1,4 enfocando al hombre de 1 m (en prioridad de diafragma, para que la exposición siga bien)
+            regla.onNodeWithTag("modoA").performClick()
             repeat(4) { regla.onAllNodesWithText("−")[1].performClick() }
             regla.onNodeWithTag("foto").performTouchInput {
                 val dw = minOf(width.toFloat(), height * FOTO_W / FOTO_H)
@@ -242,14 +243,22 @@ class GestosTest {
             captura("9c_70mm")
             // ISO alto en prioridad de diafragma, con el histograma por canales
             regla.onNodeWithText("24 mm").performClick()
-            regla.onNodeWithTag("modoA").performClick()
-            repeat(7) { regla.onAllNodesWithText("+")[2].performClick() }
+            repeat(5) { regla.onAllNodesWithText("+")[1].performClick() }
+            repeat(5) { regla.onAllNodesWithText("+")[2].performClick() }
             regla.onNodeWithTag("histograma").performClick()
             regla.onNodeWithTag("histograma").performClick()
             regla.waitForIdle()
             captura("9d_iso")
             horizontal(true)
             captura("9e_horizontal")
+            // otra vez f/1,4 con el 50 mm, enfocando a la mujer de 3 m
+            regla.onNodeWithText("50 mm").performClick()
+            repeat(5) { regla.onAllNodesWithText("−")[2].performClick() }
+            repeat(5) { regla.onAllNodesWithText("−")[1].performClick() }
+            regla.onNodeWithTag("exposicion").performClick()
+            regla.waitForIdle()
+            captura("9g_50mm_f14")
+            regla.onNodeWithTag("exposicion").performClick()
             regla.onNodeWithText("Opciones").performClick()
             regla.waitForIdle()
             regla.onNodeWithText("Balance de blancos").assertExists()

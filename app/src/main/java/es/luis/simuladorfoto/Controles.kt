@@ -177,10 +177,10 @@ fun BotonLinea(texto: String, modifier: Modifier = Modifier, onClick: () -> Unit
             .clip(forma)
             .background(Color(0xFF222221))
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp),
+            .padding(horizontal = 12.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(texto, color = Papel, style = letra(14.sp, FontWeight.SemiBold), maxLines = 1)
+        Text(texto, color = Papel, style = letra(13.sp, FontWeight.SemiBold), maxLines = 1)
     }
 }
 
@@ -199,7 +199,7 @@ fun Cabecera(modifier: Modifier, onOpciones: () -> Unit, onCuestionarios: () -> 
             "Simulador Foto",
             Modifier.padding(start = 8.dp).weight(1f),
             color = Papel,
-            style = TextStyle(fontFamily = ArchivoAncha, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp),
+            style = TextStyle(fontFamily = ArchivoAncha, fontWeight = FontWeight.ExtraBold, fontSize = 13.sp),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -320,7 +320,7 @@ fun Diales(cam: Camara) {
         titulo = "Velocidad",
         valor = "${etiquetasVel[cam.iVel]} s",
         nota = when {
-            velAutomatica && sinMargen -> "No hay velocidad que valga"
+            velAutomatica && sinMargen -> "Sin margen"
             cam.tripode -> "Con trípode no sale movida"
             cam.movida -> "Movida: usa $etiquetaSegura o más rápida"
             else -> "A pulso hasta $etiquetaSegura"
@@ -334,7 +334,7 @@ fun Diales(cam: Camara) {
     Dial(
         titulo = "Diafragma",
         valor = "f/${textoDiafragma(cam.n)}",
-        nota = if (diaAutomatico && sinMargen) "No hay diafragma que valga" else "",
+        nota = if (diaAutomatico && sinMargen) "Sin margen" else "",
         notaAviso = true,
         etiquetas = diafragmas.map { textoDiafragma(it) },
         indice = cam.iDia,
