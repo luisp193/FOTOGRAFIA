@@ -31,7 +31,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: simulador-foto-apk
+          name: SimuladorFoto_V${{ github.run_number }}
           path: simulador-foto.apk
 
       - name: Publicar versión
@@ -39,7 +39,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="v1.0.${{ github.run_number }}"
+          TAG="V${{ github.run_number }}"
           gh release create "$TAG" simulador-foto.apk \
             --title "Simulador Foto $TAG" \
             --notes "APK compilado automáticamente. Descarga simulador-foto.apk e instálalo (se puede instalar encima de la versión anterior)." \
